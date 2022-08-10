@@ -18,7 +18,7 @@
 %define lname libglslang11
 Name:           glslang
 Version:        11.8.0
-Release:        1
+Release:        2
 Summary:        OpenGL and OpenGL ES shader front end and validator
 License:        BSD-3-Clause
 Group:          Development/Libraries/C and C++
@@ -32,6 +32,7 @@ BuildRequires:  cmake >= 2.8
 BuildRequires:  fdupes
 BuildRequires:  gcc-c++
 BuildRequires:  python3-devel
+BuildRequires:  ninja-build
 
 %description
 glslang is a compiler front end for the OpenGL ES and OpenGL shading
@@ -70,29 +71,33 @@ compressor's dictionary can find better cross module commonality.
 
 %build
 %global _lto_cflags %{?_lto_cflags} -ffat-lto-objects
-# Trim -Wl,--no-undefined for now (https://github.com/KhronosGroup/glslang/issues/1484)
-mkdir -p build 
-cd build
-%cmake $OLDPWD -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--as-needed -Wl,-z,now"
-%make_build
+# Refactor: Build twice and deliver both shared and static ones.
+%cmake -B build-shared \
+  -G Ninja \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_SHARED_LIBS=ON
+%ninja_build -C build-shared
+
+%cmake -B build-static \
+  -G Ninja \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_SHARED_LIBS=OFF
+%ninja_build -C build-static
 
 %install
+# Install for both shared and static.
 %global _lto_cflags %{_lto_cflags} -ffat-lto-objects
-DESTDIR=%{buildroot} make %{?_smp_mflags} install -C build
+%ninja_install -C build-shared
+%ninja_install -C build-static
 b="%buildroot"
-find "$b" -type f -name "*.a" -print -delete
-mkdir -p "$b/%_includedir"
-cp -a SPIRV glslang "$b/%_includedir/"
-find "$b/%_includedir/" -type f ! -iname "*.h" -a ! -iname "*.hpp" -print -delete
-ln -s SPIRV/spirv.hpp "$b/%_includedir/"
-find "$b/%_includedir/" -type f -exec chmod a-x "{}" "+"
-cp build/StandAlone/libglslang-default-resource-limits.so "$b/%_libdir/"
-
+# Remove .a file breaks 3rd party apps expectations -- jchzhou
 # 3rd party programs use -lOGLCompiler (because pristine glslang ships .a files),
 # so satisfy them under our shared build.
-ln -s libglslang.so "$b/%_libdir/libOGLCompiler.so"
-ln -s libglslang.so "$b/%_libdir/libOSDependent.so"
-%fdupes %buildroot/%_prefix
+ln -s libglslang.so "$b/%{_libdir}/libOGLCompiler.so"
+ln -s libglslang.so "$b/%{_libdir}/libOSDependent.so"
+%fdupes %{buildroot}/%{_prefix}
 
 %post   -n %lname -p /sbin/ldconfig
 %postun -n %lname -p /sbin/ldconfig
@@ -111,9 +116,22 @@ ln -s libglslang.so "$b/%_libdir/libOSDependent.so"
 %_libdir/libSPIRV.so
 %_libdir/libSPVRemapper.so
 %_libdir/libglslang.so
+%{_libdir}/libHLSL.a
+%{_libdir}/libOGLCompiler.a
+%{_libdir}/libOSDependent.a
+%{_libdir}/libSPIRV.a
+%{_libdir}/libSPVRemapper.a
+%{_libdir}/libglslang.a
+%{_libdir}/libGenericCodeGen.a
+%{_libdir}/libMachineIndependent.a
+%{_libdir}/libglslang-default-resource-limits.a
 %_includedir/*
 
 %changelog
+* Tue Aug 09 2022 Jchzhou <jchzhou@outlook.com> 11.8.0-2
+- Add .a files back to meet 3rd party apps' expectations
+- build/install with ninja macros
+
 * Fri Apr 15 2022 Jingwiw <ixoote@gmail.com> 11.8.0-1
 - init from openSUSE
   author: openSUSE
